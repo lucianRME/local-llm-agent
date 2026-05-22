@@ -157,6 +157,12 @@ ENV/
 env.bak/
 venv.bak/
 
+# Local documents
+data/documents/*
+!data/documents/.gitkeep
+data/projects/*
+!data/projects/.gitkeep
+
 # Spyder project settings
 .spyderproject
 .spyproject

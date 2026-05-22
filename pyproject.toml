@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-llm-agent"
+version = "0.1.0"
+description = "Privacy-first local LLM agent powered by Ollama."
+requires-python = ">=3.11"
+dependencies = [
+    "requests",
+    "python-dotenv",
+]
+
+[project.scripts]
+local-llm-agent = "local_llm_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
