@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,33 @@ DEPENDENCY_FILE_NAMES = {
     "go.mod",
     "gemfile",
 }
+CI_FILE_NAMES = {
+    ".gitlab-ci.yml",
+    ".travis.yml",
+    "azure-pipelines.yml",
+    "bitbucket-pipelines.yml",
+    "circle.yml",
+    "jenkinsfile",
+}
+SOURCE_ENTRY_NAMES = {
+    "app",
+    "apps",
+    "cli",
+    "cmd",
+    "lib",
+    "package",
+    "packages",
+    "server",
+    "src",
+}
+APP_ENTRY_NAMES = {
+    "app.py",
+    "main.py",
+    "index.html",
+    "package.json",
+    "pyproject.toml",
+    "requirements.txt",
+}
 TEXT_EXTENSIONS = {
     ".css",
     ".html",
@@ -73,9 +101,15 @@ class ProjectSummary:
     has_agents: bool
     has_license: bool
     has_gitignore: bool
+    has_ci: bool
+    has_clear_structure: bool
     dependency_files: tuple[str, ...]
     todo_count: int
     top_level_entries: tuple[str, ...]
+    project_type: str
+    classification_reason: str
+    maturity_score: int
+    maturity_band: str
     skipped_files: int
 
     def to_prompt_context(self) -> str:
@@ -98,9 +132,15 @@ class ProjectSummary:
             f"AGENTS.md present: {self._yes_no(self.has_agents)}\n"
             f"License present: {self._yes_no(self.has_license)}\n"
             f".gitignore present: {self._yes_no(self.has_gitignore)}\n"
+            f"CI config present: {self._yes_no(self.has_ci)}\n"
+            f"Clear app/source structure: {self._yes_no(self.has_clear_structure)}\n"
             f"Dependency files: {dependency_files}\n"
             f"TODO/FIXME count: {self.todo_count}\n"
             f"Notable top-level files/folders: {top_level_entries}\n"
+            f"Project type: {self.project_type}\n"
+            f"Classification reason: {self.classification_reason}\n"
+            f"Maturity score: {self.maturity_score}\n"
+            f"Maturity band: {self.maturity_band}\n"
             f"Skipped files: {self.skipped_files}"
         )
 
@@ -195,9 +235,11 @@ class ProjectScanner:
         has_agents = False
         has_license = False
         has_gitignore = False
+        has_ci = self._has_ci_config(project_path)
         dependency_files: set[str] = set()
         todo_count = 0
         top_level_entries = self._top_level_entries(project_path)
+        has_clear_structure = self._has_clear_structure(top_level_entries)
 
         for path in self._iter_project_files(project_path):
             if self._should_skip_file(path):
@@ -225,6 +267,28 @@ class ProjectScanner:
                 dependency_files.add(path.name)
             todo_count += self._count_todos(path)
 
+        project_type, classification_reason = self._classify_project(
+            project_path.name,
+            has_readme=has_readme,
+            has_tests=has_tests,
+            has_clear_structure=has_clear_structure,
+            dependency_files=dependency_files,
+            extensions=extension_counts,
+            top_level_entries=top_level_entries,
+        )
+        maturity_score = self._calculate_maturity_score(
+            has_readme=has_readme,
+            has_tests=has_tests,
+            has_dependency_files=bool(dependency_files),
+            has_license=has_license,
+            has_gitignore=has_gitignore,
+            has_agents=has_agents,
+            has_clear_structure=has_clear_structure,
+            todo_count=todo_count,
+            has_ci=has_ci,
+        )
+        maturity_band = self._maturity_band(project_type, maturity_score)
+
         return ProjectSummary(
             name=project_path.name,
             path=str(project_path),
@@ -240,9 +304,15 @@ class ProjectScanner:
             has_agents=has_agents,
             has_license=has_license,
             has_gitignore=has_gitignore,
+            has_ci=has_ci,
+            has_clear_structure=has_clear_structure,
             dependency_files=tuple(sorted(dependency_files)),
             todo_count=todo_count,
             top_level_entries=top_level_entries,
+            project_type=project_type,
+            classification_reason=classification_reason,
+            maturity_score=maturity_score,
+            maturity_band=maturity_band,
             skipped_files=skipped_files,
         )
 
@@ -303,6 +373,227 @@ class ProjectScanner:
 
         upper_text = text.upper()
         return upper_text.count("TODO") + upper_text.count("FIXME")
+
+    def _has_ci_config(self, project_path: Path) -> bool:
+        workflows_dir = project_path / ".github" / "workflows"
+        if workflows_dir.is_dir():
+            for path in workflows_dir.iterdir():
+                if path.is_file() and path.suffix.lower() in {".yml", ".yaml"}:
+                    return True
+
+        for path in project_path.iterdir():
+            if path.is_file() and path.name.lower() in CI_FILE_NAMES:
+                return True
+
+        circle_config = project_path / ".circleci" / "config.yml"
+        return circle_config.is_file()
+
+    def _has_clear_structure(self, top_level_entries: tuple[str, ...]) -> bool:
+        lower_entries = {entry.lower() for entry in top_level_entries}
+        return bool(lower_entries & SOURCE_ENTRY_NAMES) or bool(
+            lower_entries & APP_ENTRY_NAMES
+        )
+
+    def _classify_project(
+        self,
+        name: str,
+        *,
+        has_readme: bool,
+        has_tests: bool,
+        has_clear_structure: bool,
+        dependency_files: set[str],
+        extensions: Counter[str],
+        top_level_entries: tuple[str, ...],
+    ) -> tuple[str, str]:
+        lower_name = name.lower()
+        lower_entries = {entry.lower() for entry in top_level_entries}
+        text = " ".join([lower_name, *lower_entries])
+
+        if self._has_any_hint(
+            text,
+            {
+                "coursera",
+                "course",
+                "tutorial",
+                "lesson",
+                "bootcamp",
+                "udemy",
+                "codecademy",
+                "freecodecamp",
+                "learning",
+                "exercise",
+                "assignment",
+            },
+        ):
+            return (
+                "learning_course",
+                "Project name or top-level structure suggests course or practice "
+                "material rather than a deployable product.",
+            )
+
+        if self._has_any_hint(
+            text,
+            {
+                "interview",
+                "leetcode",
+                "hackerrank",
+                "codewars",
+                "dsa",
+                "algorithm",
+                "algorithms",
+                "prep",
+                "coding-challenge",
+            },
+        ):
+            return (
+                "interview_prep",
+                "Project name or structure suggests interview preparation or "
+                "algorithm practice.",
+            )
+
+        if self._has_any_hint(text, {"archive", "old", "personal", "scratch"}):
+            return (
+                "archive_or_personal",
+                "Project naming suggests archived, personal, or scratch material.",
+            )
+
+        if self._has_any_hint(text, {"docs", "documentation", "mkdocs", "book"}):
+            return (
+                "documentation_site",
+                "Project metadata emphasizes documentation content or docs-oriented "
+                "structure.",
+            )
+
+        website_hints = {"portfolio", "website", "homepage", "site"}
+        if self._has_any_hint(text, website_hints) and self._has_web_extension(
+            extensions
+        ):
+            return (
+                "portfolio_website",
+                "Project name and web files indicate a personal or portfolio website.",
+            )
+
+        if self._has_any_hint(text, {"demo", "prototype", "mvp", "experiment"}):
+            return (
+                "experiment_mvp",
+                "Project naming suggests an experiment, demo, prototype, or MVP.",
+            )
+
+        app_hints = {
+            "app",
+            "application",
+            "portal",
+            "dashboard",
+            "forge",
+            "synapse",
+        }
+        if (
+            self._has_any_hint(text, app_hints)
+            or ("src" in lower_entries and bool(dependency_files))
+            or ("app" in lower_entries and bool(dependency_files))
+        ):
+            return (
+                "product_app",
+                "Project metadata indicates an app-like repository with deployable "
+                "product structure.",
+            )
+
+        if self._has_any_hint(text, {"lib", "library", "package", "tool", "cli"}):
+            return (
+                "library_or_tool",
+                "Project name or folders indicate a reusable library, package, CLI, "
+                "or developer tool.",
+            )
+
+        if has_clear_structure and (has_readme or has_tests or dependency_files):
+            return (
+                "experiment_mvp",
+                "Project has some app or source structure but not enough naming "
+                "metadata to classify as a product.",
+            )
+
+        return (
+            "unknown",
+            "Available metadata is not specific enough to classify the project "
+            "confidently.",
+        )
+
+    def _has_any_hint(self, text: str, hints: set[str]) -> bool:
+        text_tokens = set(re.findall(r"[a-z0-9]+", text))
+        for hint in hints:
+            hint_tokens = re.findall(r"[a-z0-9]+", hint)
+            if hint_tokens and all(token in text_tokens for token in hint_tokens):
+                return True
+        return False
+
+    def _has_web_extension(self, extensions: Counter[str]) -> bool:
+        return any(
+            extension in extensions
+            for extension in {".html", ".css", ".js", ".ts", ".tsx"}
+        )
+
+    def _calculate_maturity_score(
+        self,
+        *,
+        has_readme: bool,
+        has_tests: bool,
+        has_dependency_files: bool,
+        has_license: bool,
+        has_gitignore: bool,
+        has_agents: bool,
+        has_clear_structure: bool,
+        todo_count: int,
+        has_ci: bool,
+    ) -> int:
+        score = 0
+        if has_readme:
+            score += 15
+        if has_tests:
+            score += 20
+        if has_dependency_files:
+            score += 10
+        if has_license:
+            score += 10
+        if has_gitignore:
+            score += 5
+        if has_agents:
+            score += 10
+        if has_clear_structure:
+            score += 10
+        if todo_count <= 2:
+            score += 10
+        if has_ci:
+            score += 10
+        return min(score, 100)
+
+    def _maturity_band(self, project_type: str, score: int) -> str:
+        if project_type == "archive_or_personal":
+            return "archive_or_ignore"
+
+        if project_type in {"learning_course", "interview_prep"}:
+            return "needs_cleanup" if score >= 50 else "archive_or_ignore"
+
+        if project_type == "experiment_mvp":
+            if score >= 70:
+                return "promising"
+            if score >= 35:
+                return "needs_cleanup"
+            return "archive_or_ignore"
+
+        if project_type == "unknown":
+            if score >= 70:
+                return "promising"
+            if score >= 40:
+                return "needs_cleanup"
+            return "archive_or_ignore"
+
+        if score >= 80:
+            return "strong"
+        if score >= 55:
+            return "promising"
+        if score >= 30:
+            return "needs_cleanup"
+        return "archive_or_ignore"
 
     def _looks_binary(self, path: Path) -> bool:
         try:

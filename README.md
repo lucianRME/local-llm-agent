@@ -114,6 +114,30 @@ secret-looking files, binary files, and very large files.
 By default, only project metadata and short summaries are sent to the local LLM,
 not full source code.
 
+### v0.4: project classification and maturity scoring
+
+The project scanner now classifies each local repository before asking the
+local model to judge portfolio readiness. By default, it still scans metadata
+only: project names, top-level files and folders, language extensions,
+dependency files, README/test/license/gitignore/AGENTS.md/CI presence, and
+TODO/FIXME counts.
+
+For each repository, the tool adds:
+
+- a project type such as `product_app`, `portfolio_website`,
+  `learning_course`, `interview_prep`, `documentation_site`,
+  `library_or_tool`, `experiment_mvp`, `archive_or_personal`, or `unknown`
+- a short classification reason
+- a deterministic 0-100 maturity score
+- a maturity band: `strong`, `promising`, `needs_cleanup`, or
+  `archive_or_ignore`
+
+The report prompt separates genuine portfolio/product candidates from learning,
+interview-prep, archive, and personal folders so course work is not treated the
+same as a product repo just because it has files. All analysis remains local:
+there is no cloud API, GitHub API, command execution, vector database, or full
+source-code reading by default.
+
 ## Local Documents
 
 Create the local documents directory:

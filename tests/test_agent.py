@@ -124,9 +124,15 @@ def test_agent_includes_project_metadata_when_available():
                 has_agents=True,
                 has_license=False,
                 has_gitignore=True,
+                has_ci=True,
+                has_clear_structure=True,
                 dependency_files=("requirements.txt",),
                 todo_count=3,
                 top_level_entries=("README.md", "src", "tests"),
+                project_type="product_app",
+                classification_reason="Project metadata indicates an app-like repository.",
+                maturity_score=65,
+                maturity_band="promising",
                 skipped_files=2,
             )
         ]
@@ -149,9 +155,15 @@ def test_agent_includes_project_metadata_when_available():
     assert "AGENTS.md present: yes" in prompt
     assert "License present: no" in prompt
     assert ".gitignore present: yes" in prompt
+    assert "CI config present: yes" in prompt
+    assert "Clear app/source structure: yes" in prompt
     assert "Dependency files: requirements.txt" in prompt
     assert "TODO/FIXME count: 3" in prompt
     assert "Notable top-level files/folders: README.md, src, tests" in prompt
+    assert "Project type: product_app" in prompt
+    assert "Classification reason: Project metadata indicates an app-like repository." in prompt
+    assert "Maturity score: 65" in prompt
+    assert "Maturity band: promising" in prompt
     assert "not full source code" in prompt
     assert "Do not say you cannot access the repositories" in prompt
     assert "Question: Which projects need tests?" in prompt
@@ -172,9 +184,15 @@ def test_project_prompt_includes_requested_report_sections_and_categories():
                 has_agents=False,
                 has_license=True,
                 has_gitignore=True,
+                has_ci=False,
+                has_clear_structure=True,
                 dependency_files=("package.json",),
                 todo_count=0,
                 top_level_entries=("README.md", "package.json", "src"),
+                project_type="product_app",
+                classification_reason="Project metadata indicates an app-like repository.",
+                maturity_score=65,
+                maturity_band="promising",
                 skipped_files=0,
             )
         ]
@@ -190,13 +208,17 @@ def test_project_prompt_includes_requested_report_sections_and_categories():
 
     prompt = client.messages[0]
     assert "Project: client-portal" in prompt
-    assert "A. Repositories found" in prompt
-    assert "B. Repeated patterns" in prompt
-    assert "C. Portfolio readiness" in prompt
-    assert "D. Common gaps" in prompt
-    assert "E. Recommended standard template" in prompt
-    assert "F. Next 5 actions" in prompt
-    assert "strong, promising, needs cleanup, archive/ignore" in prompt
+    assert "Project type: product_app" in prompt
+    assert "Maturity score: 65" in prompt
+    assert "Maturity band: promising" in prompt
+    assert "A. Repository inventory" in prompt
+    assert "B. Strongest portfolio candidates" in prompt
+    assert "C. Supporting/learning repos" in prompt
+    assert "D. Repeated patterns across serious repos" in prompt
+    assert "E. Common gaps by priority" in prompt
+    assert "F. Recommended next 5 actions" in prompt
+    assert "learning_course, interview_prep, archive_or_personal, or unknown" in prompt
+    assert "Learning and interview-prep repos" in prompt
     assert "Do not say \"I cannot access your repositories\"" in prompt
     assert "Do not suggest generic tools such as SonarQube, ESLint, or Git" in prompt
 
